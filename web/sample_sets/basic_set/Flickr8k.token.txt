@@ -1,0 +1,8 @@
+image0.jpg#0	a child playing with ball
+image0.jpg#1	a smiling child on grass
+image1.jpg#0	a dog running in park
+image1.jpg#1	a small dog on field
+image2.jpg#0	a woman standing near tree
+image2.jpg#1	a person outside near grass
+image3.jpg#0	a man walking in street
+image3.jpg#1	a person standing outdoors

@@ -1,0 +1,8 @@
+image0.jpg#0	a cat sitting near water
+image0.jpg#1	a small cat outdoors
+image1.jpg#0	a group playing in park
+image1.jpg#1	people standing on grass
+image2.jpg#0	a child with red ball
+image2.jpg#1	a kid running in field
+image3.jpg#0	a man and dog near tree
+image3.jpg#1	a person with animal outside

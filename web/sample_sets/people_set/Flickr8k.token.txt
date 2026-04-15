@@ -1,0 +1,8 @@
+image0.jpg#0	a man standing near street
+image0.jpg#1	a person outside in city
+image1.jpg#0	a woman smiling in park
+image1.jpg#1	a person walking on grass
+image2.jpg#0	a child playing outside
+image2.jpg#1	a kid running in field
+image3.jpg#0	two people standing together
+image3.jpg#1	a group outside near tree

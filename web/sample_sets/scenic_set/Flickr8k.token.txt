@@ -1,0 +1,8 @@
+image0.jpg#0	a lake near mountains
+image0.jpg#1	a calm water scene outside
+image1.jpg#0	green landscape under sky
+image1.jpg#1	a peaceful field outdoors
+image2.jpg#0	sunset over distant trees
+image2.jpg#1	orange sky above nature
+image3.jpg#0	hills and open field
+image3.jpg#1	a scenic outdoor view
