@@ -13,6 +13,10 @@ def main() -> None:
     parser.add_argument("--model", type=Path, default=Path("artifacts/caption_model.keras"))
     parser.add_argument("--tokenizer", type=Path, default=Path("artifacts/tokenizer.pkl"))
     parser.add_argument("--max-length", type=Path, default=Path("artifacts/max_length.txt"))
+    parser.add_argument("--strategy", choices=["greedy", "sample", "beam"], default="greedy")
+    parser.add_argument("--beam-width", type=int, default=3)
+    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--top-k", type=int, default=0)
     args = parser.parse_args()
 
     feature = extract_single_image_feature(args.image)
@@ -21,6 +25,10 @@ def main() -> None:
         model_path=args.model,
         tokenizer_path=args.tokenizer,
         max_length_path=args.max_length,
+        strategy=args.strategy,
+        beam_width=args.beam_width,
+        temperature=args.temperature,
+        top_k=args.top_k,
     )
 
     print(caption if caption else "[empty caption]")

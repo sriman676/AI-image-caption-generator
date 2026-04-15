@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 import numpy as np
 import tensorflow as tf
@@ -11,6 +11,28 @@ from tensorflow import keras
 from aicg.data.flickr8k import filter_captions_by_images, load_captions, load_image_list
 from aicg.model.caption_model import build_caption_model
 from aicg.utils.io import save_pickle, save_text
+
+
+class _TrainingProgressCallback(keras.callbacks.Callback):
+    def __init__(self, progress_callback: Callable[[int, float], None] | None) -> None:
+        super().__init__()
+        self._progress_callback = progress_callback
+
+    def on_epoch_end(self, epoch, logs=None) -> None:  # type: ignore[override]
+        if self._progress_callback is None:
+            return
+        loss = float((logs or {}).get("loss", 0.0))
+        self._progress_callback(int(epoch) + 1, loss)
+
+
+class _StopTrainingCallback(keras.callbacks.Callback):
+    def __init__(self, should_stop: Callable[[], bool] | None) -> None:
+        super().__init__()
+        self._should_stop = should_stop
+
+    def on_train_batch_end(self, batch, logs=None) -> None:  # type: ignore[override]
+        if self._should_stop is not None and self._should_stop():
+            self.model.stop_training = True
 
 
 def build_tokenizer(
@@ -91,7 +113,12 @@ def train_model(
     max_length_path: Path,
     epochs: int = 20,
     batch_size: int = 64,
-) -> None:
+    checkpoint_path: Path | None = None,
+    resume_from_checkpoint: bool = False,
+    early_stopping_patience: int | None = None,
+    progress_callback: Callable[[int, float], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> dict[str, float | int]:
     captions = load_captions(captions_file)
     train_images = load_image_list(train_images_file)
     train_captions = filter_captions_by_images(captions, train_images)
@@ -124,14 +151,58 @@ def train_model(
 
     model = build_caption_model(vocab_size=vocab_size, max_length=max_length, feature_dim=feature_dim)
 
+    if checkpoint_path is not None and resume_from_checkpoint and checkpoint_path.exists():
+        model = keras.models.load_model(checkpoint_path)
+
     pairs = _pair_count(train_captions, tokenizer)
     steps_per_epoch = max(1, math.ceil(pairs / batch_size))
 
     generator = _sequence_generator(train_captions, features, tokenizer, max_length, batch_size)
 
-    model.fit(generator, epochs=epochs, steps_per_epoch=steps_per_epoch, verbose=1)
+    callbacks: list[keras.callbacks.Callback] = [
+        _TrainingProgressCallback(progress_callback),
+        _StopTrainingCallback(should_stop),
+    ]
+
+    if checkpoint_path is not None:
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        callbacks.append(
+            keras.callbacks.ModelCheckpoint(
+                filepath=str(checkpoint_path),
+                monitor="loss",
+                save_best_only=True,
+            )
+        )
+
+    if early_stopping_patience is not None and early_stopping_patience > 0:
+        callbacks.append(
+            keras.callbacks.EarlyStopping(
+                monitor="loss",
+                patience=int(early_stopping_patience),
+                restore_best_weights=True,
+            )
+        )
+
+    history = model.fit(
+        generator,
+        epochs=epochs,
+        steps_per_epoch=steps_per_epoch,
+        verbose=1,
+        callbacks=callbacks,
+    )
 
     model_path.parent.mkdir(parents=True, exist_ok=True)
     model.save(model_path)
     save_pickle(tokenizer, tokenizer_path)
     save_text(str(max_length), max_length_path)
+
+    losses = [float(v) for v in history.history.get("loss", [])]
+    final_loss = losses[-1] if losses else 0.0
+    perplexity = float(math.exp(min(final_loss, 20.0)))
+    return {
+        "pairs": int(pairs),
+        "steps_per_epoch": int(steps_per_epoch),
+        "epochs_ran": int(len(losses) if losses else epochs),
+        "final_loss": float(final_loss),
+        "perplexity": float(perplexity),
+    }

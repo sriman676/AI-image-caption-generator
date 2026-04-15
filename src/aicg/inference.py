@@ -48,11 +48,34 @@ def _id_to_word(index: int, tokenizer) -> str | None:
     return tokenizer.index_word.get(index)
 
 
+def _sample_from_probs(
+    probs: np.ndarray,
+    temperature: float = 1.0,
+    top_k: int = 0,
+) -> int:
+    safe_temp = max(temperature, 1e-6)
+    logits = np.log(np.clip(probs, 1e-12, 1.0)) / safe_temp
+    scaled = np.exp(logits - np.max(logits))
+    scaled = scaled / np.sum(scaled)
+
+    if top_k and top_k > 0:
+        top_idx = np.argsort(scaled)[-int(top_k) :]
+        top_probs = scaled[top_idx]
+        top_probs = top_probs / np.sum(top_probs)
+        return int(np.random.choice(top_idx, p=top_probs))
+
+    return int(np.random.choice(np.arange(len(scaled)), p=scaled))
+
+
 def generate_caption(
     image_feature: np.ndarray,
     model_path: Path,
     tokenizer_path: Path,
     max_length_path: Path,
+    strategy: str = "greedy",
+    beam_width: int = 3,
+    temperature: float = 1.0,
+    top_k: int = 0,
 ) -> str:
     model, tokenizer, max_length = _load_captioning_artifacts(
         str(model_path.resolve()),
@@ -60,24 +83,61 @@ def generate_caption(
         str(max_length_path.resolve()),
     )
 
-    in_text = "startseq"
-    for _ in range(max_length):
-        seq = tokenizer.texts_to_sequences([in_text])[0]
-        seq = keras.preprocessing.sequence.pad_sequences([seq], maxlen=max_length, padding="post")
+    if strategy == "beam":
+        beams: list[tuple[str, float]] = [("startseq", 0.0)]
+        width = max(1, int(beam_width))
+        for _ in range(max_length):
+            candidates: list[tuple[str, float]] = []
+            for text, score in beams:
+                if text.split()[-1] == "endseq":
+                    candidates.append((text, score))
+                    continue
 
-        yhat = model.predict([
-            np.expand_dims(image_feature, axis=0),
-            seq,
-        ], verbose=0)
+                seq = tokenizer.texts_to_sequences([text])[0]
+                seq = keras.preprocessing.sequence.pad_sequences([seq], maxlen=max_length, padding="post")
+                yhat = model.predict([
+                    np.expand_dims(image_feature, axis=0),
+                    seq,
+                ], verbose=0)[0]
 
-        next_index = int(np.argmax(yhat, axis=-1)[0])
-        word = _id_to_word(next_index, tokenizer)
-        if word is None:
-            break
+                top_indices = np.argsort(yhat)[-width:][::-1]
+                for idx in top_indices:
+                    word = _id_to_word(int(idx), tokenizer)
+                    if word is None:
+                        continue
+                    prob = float(np.clip(yhat[int(idx)], 1e-12, 1.0))
+                    candidates.append((f"{text} {word}", score + float(np.log(prob))))
 
-        in_text += f" {word}"
-        if word == "endseq":
-            break
+            if not candidates:
+                break
+            beams = sorted(candidates, key=lambda item: item[1], reverse=True)[:width]
+            if all(text.split()[-1] == "endseq" for text, _ in beams):
+                break
+
+        in_text = beams[0][0] if beams else "startseq"
+    else:
+        in_text = "startseq"
+        for _ in range(max_length):
+            seq = tokenizer.texts_to_sequences([in_text])[0]
+            seq = keras.preprocessing.sequence.pad_sequences([seq], maxlen=max_length, padding="post")
+
+            yhat = model.predict([
+                np.expand_dims(image_feature, axis=0),
+                seq,
+            ], verbose=0)[0]
+
+            if strategy == "sample":
+                next_index = _sample_from_probs(yhat, temperature=temperature, top_k=top_k)
+            else:
+                next_index = int(np.argmax(yhat))
+
+            word = _id_to_word(next_index, tokenizer)
+            if word is None:
+                break
+
+            in_text += f" {word}"
+            if word == "endseq":
+                break
 
     words = [w for w in in_text.split() if w not in {"startseq", "endseq"}]
     return " ".join(words).strip()

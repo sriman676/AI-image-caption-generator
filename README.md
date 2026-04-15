@@ -109,6 +109,16 @@ The webpage includes 3 tabs:
 It also includes sidebar automation:
 - `Auto Run Extract + Train`: runs extraction and training automatically for the currently configured paths.
 - `Run Full Auto Setup` (sample sets): applies sample paths, runs extraction + training, then opens Caption with an automatic preview.
+- `Rounds` (1-10): repeat pipeline rounds automatically for smoke/stability runs.
+
+New automatic improvements:
+- preflight validation checks before running jobs
+- background pipeline run with cancel support
+- resume from checkpoint for interrupted training
+- cache fingerprint to skip repeated extract/train on unchanged data
+- quality metrics shown after training (`epochs_ran`, `final_loss`, `perplexity`)
+- caption decoding controls (`greedy`, `sample`, `beam`, with beam width / temperature / top-k)
+- one-click full run: upload image -> extract -> train -> caption preview
 
 It also includes a `Help` page with visual screenshots for:
 
@@ -141,6 +151,22 @@ The webpage is beginner-friendly with:
 - caption output explanation (why this output appears)
 - automatic caption generation right after image upload
 - Help screenshots for setup and output-change guidance
+
+## Quick Smoke Tests
+
+Run smoke tests:
+
+```bash
+PYTHONPATH=src pytest -q
+```
+
+## Docker (One Command)
+
+Build and run:
+
+```bash
+docker build -t aicg-app . && docker run --rm -p 8501:8501 aicg-app
+```
 
 ## Dataset Layout (Flickr8k)
 
