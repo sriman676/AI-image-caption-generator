@@ -83,6 +83,65 @@ def _complete_sample_setup(sample_set_name: str) -> tuple[int, str]:
     return image_count, paths["model_out"]
 
 
+def _run_auto_extract_and_train() -> tuple[int, str]:
+    image_count = extract_features_from_dir(
+        Path(st.session_state["images_dir"]),
+        Path(st.session_state["features_path"]),
+        image_size=int(st.session_state["image_size"]),
+    )
+
+    train_model(
+        captions_file=Path(st.session_state["captions_file"]),
+        train_images_file=Path(st.session_state["train_images_file"]),
+        features_path=Path(st.session_state["features_path"]),
+        model_path=Path(st.session_state["model_out"]),
+        tokenizer_path=Path(st.session_state["tokenizer_out"]),
+        max_length_path=Path(st.session_state["max_length_out"]),
+        epochs=int(st.session_state["train_epochs"]),
+        batch_size=int(st.session_state["train_batch_size"]),
+    )
+
+    st.session_state["model_path"] = st.session_state["model_out"]
+    st.session_state["tokenizer_path"] = st.session_state["tokenizer_out"]
+    st.session_state["max_length_path"] = st.session_state["max_length_out"]
+    return image_count, st.session_state["model_out"]
+
+
+def _first_image_in_dir(images_dir: Path) -> Path:
+    patterns = ("*.jpg", "*.jpeg", "*.png")
+    image_files = sorted({p for pattern in patterns for p in images_dir.glob(pattern)})
+    if not image_files:
+        raise FileNotFoundError(f"No images found in {images_dir}. Supported: .jpg, .jpeg, .png")
+    return image_files[0]
+
+
+def _generate_caption_for_image(
+    image_path: Path,
+    model_path: Path,
+    tokenizer_path: Path,
+    max_length_path: Path,
+) -> str:
+    feature = extract_single_image_feature(image_path)
+    return generate_caption(
+        image_feature=feature,
+        model_path=model_path,
+        tokenizer_path=tokenizer_path,
+        max_length_path=max_length_path,
+    )
+
+
+def _generate_auto_preview_for_sample(sample_set_name: str) -> tuple[Path, str]:
+    paths = _sample_set_paths(sample_set_name)
+    preview_image = _first_image_in_dir(Path(paths["images_dir"]))
+    caption = _generate_caption_for_image(
+        image_path=preview_image,
+        model_path=Path(paths["model_out"]),
+        tokenizer_path=Path(paths["tokenizer_out"]),
+        max_length_path=Path(paths["max_length_out"]),
+    )
+    return preview_image, caption
+
+
 @lru_cache(maxsize=1)
 def _extractor_model():
     return keras.applications.MobileNetV2(
@@ -188,8 +247,8 @@ def _train_tab() -> None:
         tokenizer_out = st.text_input("Tokenizer output", key="tokenizer_out")
         max_length_out = st.text_input("Max length output", key="max_length_out")
     with c2:
-        epochs = st.slider("Epochs", min_value=1, max_value=100, value=20)
-        batch_size = st.selectbox("Batch size", [16, 32, 64, 128], index=2)
+        epochs = st.slider("Epochs", min_value=1, max_value=100, value=20, key="train_epochs")
+        batch_size = st.selectbox("Batch size", [16, 32, 64, 128], index=2, key="train_batch_size")
 
     if not _ready(features_path):
         st.warning("Features file not found yet. Run Extract first or verify path.")
@@ -240,6 +299,14 @@ def _caption_tab() -> None:
     tokenizer_path = Path(st.text_input("Tokenizer path", key="tokenizer_path"))
     max_length_path = Path(st.text_input("Max length path", key="max_length_path"))
 
+    auto_preview_image = st.session_state.get("auto_preview_image")
+    auto_preview_caption = st.session_state.get("auto_preview_caption")
+    if auto_preview_image and auto_preview_caption is not None:
+        st.markdown("### Automatic Preview")
+        st.image(auto_preview_image, caption="Auto preview image", use_container_width=True)
+        st.success(f"Caption: {auto_preview_caption if auto_preview_caption else '[empty caption]'}")
+        _render_caption_explanation(auto_preview_caption, model_path, tokenizer_path, max_length_path)
+
     uploaded = st.file_uploader("Upload image", type=["jpg", "jpeg", "png"])
     if uploaded is not None:
         st.image(uploaded, caption="Uploaded image", use_container_width=True)
@@ -247,11 +314,12 @@ def _caption_tab() -> None:
     if not (_ready(str(model_path)) and _ready(str(tokenizer_path)) and _ready(str(max_length_path))):
         st.warning("Model/tokenizer/max-length file missing. Train first or verify paths.")
 
-    if st.button("Generate Caption", use_container_width=True):
-        if uploaded is None:
-            st.warning("Upload an image first.")
-            return
+    if uploaded is None:
+        st.caption("Upload an image to generate its caption automatically.")
+        return
 
+    upload_signature = f"{uploaded.name}:{uploaded.size}"
+    if st.session_state.get("last_upload_signature") != upload_signature:
         temp_image_path: Path | None = None
         with st.spinner("Generating caption..."):
             try:
@@ -260,23 +328,27 @@ def _caption_tab() -> None:
                     tmp.write(uploaded.getbuffer())
                     temp_image_path = Path(tmp.name)
 
-                feature = extract_single_image_feature(temp_image_path)
-                caption = generate_caption(
-                    image_feature=feature,
+                caption = _generate_caption_for_image(
+                    image_path=temp_image_path,
                     model_path=model_path,
                     tokenizer_path=tokenizer_path,
                     max_length_path=max_length_path,
                 )
-                st.success(f"Caption: {caption if caption else '[empty caption]'}")
-                _render_caption_explanation(caption, model_path, tokenizer_path, max_length_path)
+                st.session_state["last_upload_signature"] = upload_signature
+                st.session_state["last_upload_caption"] = caption
             except Exception as exc:  # noqa: BLE001
                 st.error(str(exc))
+                return
             finally:
                 if temp_image_path is not None:
                     try:
                         temp_image_path.unlink(missing_ok=True)
                     except Exception:  # noqa: BLE001
                         pass
+
+    last_caption = st.session_state.get("last_upload_caption", "")
+    st.success(f"Caption: {last_caption if last_caption else '[empty caption]'}")
+    _render_caption_explanation(last_caption, model_path, tokenizer_path, max_length_path)
 
 
 def _help_tab() -> None:
@@ -346,32 +418,61 @@ def main() -> None:
     st.session_state.setdefault("tokenizer_path", "artifacts/tokenizer.pkl")
     st.session_state.setdefault("max_length_path", "artifacts/max_length.txt")
     st.session_state.setdefault("image_size", 224)
+    st.session_state.setdefault("train_epochs", 20)
+    st.session_state.setdefault("train_batch_size", 64)
+    st.session_state.setdefault("page", "Extract")
+    st.session_state.setdefault("auto_preview_image", None)
+    st.session_state.setdefault("auto_preview_caption", None)
+    st.session_state.setdefault("last_upload_signature", None)
+    st.session_state.setdefault("last_upload_caption", None)
 
     _render_header()
     _render_feature_checklist()
     _render_beginner_wizard()
 
     st.sidebar.header("Navigation")
-    page = st.sidebar.radio("Go to", ["Extract", "Train", "Caption", "Help"], index=0)
+    st.sidebar.radio("Go to", ["Extract", "Train", "Caption", "Help"], key="page")
+    page = st.session_state["page"]
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Auto Pipeline")
+    if st.sidebar.button("Auto Run Extract + Train", use_container_width=True):
+        with st.spinner("Running automatic extract + train..."):
+            try:
+                image_count, model_path = _run_auto_extract_and_train()
+                st.sidebar.success(
+                    f"Automatic pipeline complete. Extracted {image_count} images and trained model at {model_path}."
+                )
+                st.session_state["page"] = "Caption"
+                st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.sidebar.error(str(exc))
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Try Sample Test Set")
     sample_sets = _available_sample_sets()
     if sample_sets:
         sample_set = st.sidebar.selectbox("Select sample", sample_sets, index=0)
-        if st.sidebar.button("Load Sample Paths", use_container_width=True):
-            with st.spinner("Running sample setup (extract + train)..."):
+        if st.sidebar.button("Run Full Auto Setup", use_container_width=True):
+            with st.spinner("Running full setup (extract + train + preview)..."):
                 try:
                     image_count, model_path = _complete_sample_setup(sample_set)
+                    preview_image, preview_caption = _generate_auto_preview_for_sample(sample_set)
+                    st.session_state["auto_preview_image"] = str(preview_image)
+                    st.session_state["auto_preview_caption"] = preview_caption
+                    st.session_state["page"] = "Caption"
                     st.sidebar.success(
                         f"Sample setup complete. Extracted {image_count} images and trained model at {model_path}."
                     )
-                    st.sidebar.info("Go to Caption page and click Generate Caption.")
+                    st.sidebar.info("Preview prepared automatically. Opening Caption page.")
+                    st.rerun()
                 except Exception as exc:  # noqa: BLE001
                     st.sidebar.error(str(exc))
 
         if st.sidebar.button("Load Paths Only", use_container_width=True):
             _apply_sample_set(sample_set)
+            st.session_state["auto_preview_image"] = None
+            st.session_state["auto_preview_caption"] = None
             st.sidebar.success(f"Loaded {sample_set} paths")
     else:
         st.sidebar.caption("No sample sets found.")

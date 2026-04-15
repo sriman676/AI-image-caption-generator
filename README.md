@@ -106,6 +106,10 @@ The webpage includes 3 tabs:
 - `Train`: train the caption model and save artifacts.
 - `Caption`: upload a new image and generate a caption.
 
+It also includes sidebar automation:
+- `Auto Run Extract + Train`: runs extraction and training automatically for the currently configured paths.
+- `Run Full Auto Setup` (sample sets): applies sample paths, runs extraction + training, then opens Caption with an automatic preview.
+
 It also includes a `Help` page with visual screenshots for:
 
 - extraction setup
@@ -123,11 +127,19 @@ You can try the app quickly using sample sets in:
 
 Use the sidebar in the webpage (`Try Sample Test Set` -> `Load Sample Paths`) to auto-fill all paths.
 
+For a full beginner flow, use `Run Full Auto Setup` in the sidebar. It will automatically:
+- load sample paths
+- extract features
+- train the model
+- switch to the Caption page
+- show an automatic caption preview when setup is finished
+
 The webpage is beginner-friendly with:
 
 - a `Beginner Wizard` readiness section
 - extraction tips and image count detection
 - caption output explanation (why this output appears)
+- automatic caption generation right after image upload
 - Help screenshots for setup and output-change guidance
 
 ## Dataset Layout (Flickr8k)
